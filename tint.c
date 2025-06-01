@@ -637,7 +637,7 @@ int main (int argc,char *argv[])
 				  engine_move (&engine,ACTION_RIGHT);
 				  break;
 				case KEY_DOWN:
-				  engine_move (&engine,ACTION_DOWN);
+				  engine_move (&engine,ACTION_DROP);
 				  break;
 				case ' ':
 				  engine_move (&engine,ACTION_DROP);
