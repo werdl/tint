@@ -34,12 +34,801 @@
 #include <pwd.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <curses.h>
+#include <wchar.h>
+#include <limits.h>
+#include <sys/time.h>
 
-#include "typedefs.h"
-#include "utils.h"
-#include "io.h"
-#include "config.h"
-#include "engine.h"
+#ifndef bool
+#define bool int
+#endif
+
+#if !defined(false) || (false != 0)
+#define false	0
+#endif
+
+#if !defined(true) || (true != 0)
+#define true	1
+#endif
+
+#if !defined(FALSE) || (FALSE != false)
+#define FALSE	false
+#endif
+
+#if !defined(TRUE) || (TRUE != true)
+#define TRUE	true
+#endif
+
+/*
+ * Error flags
+ */
+
+#if !defined(ERR) || (ERR != -1)
+#define ERR		-1
+#endif
+
+#if !defined(OK) || (OK != 0)
+#define OK		0
+#endif
+
+/*
+ * Initialize random number generator
+ */
+void rand_init ()
+{
+#ifdef USE_RAND
+   srand (time (NULL));
+#else
+   srandom (time (NULL));
+#endif
+}
+
+/*
+ * Generate a random number within range
+ */
+int rand_value (int range)
+{
+#ifdef USE_RAND
+   return ((int) ((float) range * rand () / (RAND_MAX + 1.0)));
+#else
+   return (random () % range);
+#endif
+}
+
+/*
+ * Convert an str to long. Returns TRUE if successful,
+ * FALSE otherwise.
+ */
+bool str2int (int *i,const char *str)
+{
+   char *endptr;
+   *i = strtol (str,&endptr,0);
+   if (*str == '\0' || *endptr != '\0' || *i == LONG_MIN || *i == LONG_MAX || *i < INT_MIN || *i > INT_MAX) return FALSE;
+   return TRUE;
+}
+
+/*
+ * Colors
+ */
+
+#define COLOR_BLACK     0                        /* Black */
+#define COLOR_RED       1                        /* Red */
+#define COLOR_GREEN     2                        /* Green */
+#define COLOR_YELLOW    3                        /* Yellow */
+#define COLOR_BLUE      4                        /* Blue */
+#define COLOR_MAGENTA   5                        /* Magenta */
+#define COLOR_CYAN      6                        /* Cyan */
+#define COLOR_WHITE     7                        /* White */
+
+/*
+ * Attributes
+ */
+
+#define ATTR_OFF        0                        /* All attributes off */
+#define ATTR_BOLD       1                        /* Bold On */
+#define ATTR_DIM        2                        /* Dim (Is this really in the ANSI standard? */
+#define ATTR_UNDERLINE  4                        /* Underline (Monochrome Display Only */
+#define ATTR_BLINK      5                        /* Blink On */
+#define ATTR_REVERSE    7                        /* Reverse Video On */
+#define ATTR_INVISIBLE  8                        /* Concealed On */
+
+/*
+ * Init & Close
+ */
+
+/* Initialize screen */
+void io_init ();
+
+/* Restore original screen state */
+void io_close ();
+
+/*
+ * Output
+ */
+
+/* Set color attributes */
+void out_setattr (int attr);
+
+/* Set color */
+void out_setcolor (int fg,int bg);
+
+/* Move cursor to position (x,y) on the screen. Upper corner of screen is (0,0) */
+void out_gotoxy (int x,int y);
+
+/* Put a character on the screen */
+void out_putch (char ch);
+
+/* Write a string to the screen */
+void out_printf (char *format, ...);
+
+/* Refresh screen */
+void out_refresh ();
+
+/* Get the screen width */
+int out_width ();
+
+/* Get the screen height */
+int out_height ();
+
+/* Beep */
+void out_beep ();
+
+/*
+ * Input
+ */
+
+/* Read a character */
+int in_getch ();
+
+/* Set keyboard timeout in microseconds */
+void in_timeout (int delay);
+
+/* Empty keyboard buffer */
+void in_flush ();
+
+
+/* Number of colors defined in io.h */
+#define NUM_COLORS	8
+
+/* Number of attributes defined in io.h */
+#define NUM_ATTRS	9
+
+/* Cursor definitions */
+#define CURSOR_INVISIBLE	0
+#define CURSOR_NORMAL		1
+
+/* Maps color definitions onto their real definitions */
+static int color_map[NUM_COLORS];
+
+/* Maps attribute definitions onto their real definitions */
+static int attr_map[NUM_ATTRS];
+
+/* Current attribute used on screen */
+static int out_attr;
+
+/* Current color used on screen */
+static int out_color;
+
+/* This is the timeout in microseconds */
+static int in_timetotal;
+
+/* This is the amount of time left to before a timeout occurs (in microseconds) */
+static int in_timeleft;
+
+/*
+ * Init & Close
+ */
+
+/* Initialize screen */
+void io_init ()
+{
+   initscr ();
+   start_color ();
+   curs_set (CURSOR_INVISIBLE);
+   out_attr = A_NORMAL;
+   out_color = COLOR_WHITE;
+   noecho ();
+   /* Map colors */
+   color_map[COLOR_BLACK] = COLOR_BLACK;
+   color_map[COLOR_RED] = COLOR_RED;
+   color_map[COLOR_GREEN] = COLOR_GREEN;
+   color_map[COLOR_YELLOW] = COLOR_YELLOW;
+   color_map[COLOR_BLUE] = COLOR_BLUE;
+   color_map[COLOR_MAGENTA] = COLOR_MAGENTA;
+   color_map[COLOR_CYAN] = COLOR_CYAN;
+   color_map[COLOR_WHITE] = COLOR_WHITE;
+   /* Map attributes */
+   attr_map[ATTR_OFF] = A_NORMAL;
+   attr_map[ATTR_BOLD] = A_BOLD;
+   attr_map[ATTR_DIM] = A_DIM;
+   attr_map[ATTR_UNDERLINE] = A_UNDERLINE;
+   attr_map[ATTR_BLINK] = A_BLINK;
+   attr_map[ATTR_REVERSE] = A_REVERSE;
+   attr_map[ATTR_INVISIBLE] = A_INVIS;
+
+  keypad(stdscr, TRUE);
+}
+
+/* Restore original screen state */
+void io_close ()
+{
+   echo ();
+   attrset (A_NORMAL);
+   clear ();
+   curs_set (CURSOR_NORMAL);
+   refresh ();
+   endwin ();
+}
+
+/*
+ * Output
+ */
+
+/* Set color attributes */
+void out_setattr (int attr)
+{
+   out_attr = attr_map[attr];
+}
+
+/* Set color */
+void out_setcolor (int fg,int bg)
+{
+   out_color = (color_map[bg] << 3) + color_map[fg];
+   init_pair (out_color,color_map[fg],color_map[bg]);
+   attrset (COLOR_PAIR (out_color) | out_attr);
+}
+
+/* Move cursor to position (x,y) on the screen. Upper corner of screen is (0,0) */
+void out_gotoxy (int x,int y)
+{
+   move (y,x);
+}
+
+/* Put a character on the screen */
+void out_putch (char ch)
+{
+   addch (ch);
+}
+
+/* Put a unicode character on the screen */
+/* Put a string on the screen */
+void out_printf (char *format, ...)
+{
+   va_list ap;
+   va_start (ap,format);
+   vwprintw (stdscr,format,ap);
+   va_end (ap);
+}
+
+/* Refresh screen */
+void out_refresh ()
+{
+   refresh ();
+}
+
+/* Get the screen width */
+int out_width ()
+{
+   return COLS;
+}
+
+/* Get the screen height */
+int out_height ()
+{
+   return LINES;
+}
+
+/* Beep */
+void out_beep ()
+{
+   beep ();
+}
+
+/*
+ * Input
+ */
+
+/* Read a character. Please note that you MUST call in_timeout() before in_getch() */
+int in_getch ()
+{
+   struct timeval starttv,endtv;
+   int ch;
+   timeout (in_timeleft / 1000);
+   gettimeofday (&starttv,NULL);
+   ch = getch ();
+   gettimeofday (&endtv,NULL);
+   /* Timeout? */
+   if (ch == ERR)
+	 in_timeleft = in_timetotal;
+   /* No? Then calculate time left */
+   else
+	 {
+		endtv.tv_sec -= starttv.tv_sec;
+		endtv.tv_usec -= starttv.tv_usec;
+		if (endtv.tv_usec < 0)
+		  {
+			 endtv.tv_usec += 1000000;
+			 endtv.tv_sec--;
+		  }
+		in_timeleft -= endtv.tv_usec;
+		if (in_timeleft <= 0) in_timeleft = in_timetotal;
+	 }
+   return ch;
+}
+
+/* Set keyboard timeout in microseconds */
+void in_timeout (int delay)
+{
+   /* ncurses timeout() function works with milliseconds, not microseconds */
+   in_timetotal = in_timeleft = delay;
+}
+
+/* Empty keyboard buffer */
+void in_flush ()
+{
+   flushinp ();
+}
+
+const char scorefile[] = "/var/games/tint.scores";
+/*
+ * Macros
+ */
+
+/* Number of shapes in the game */
+#define NUMSHAPES	7
+
+/* Number of blocks in each shape */
+#define NUMBLOCKS	4
+
+/* Number of rows and columns in board */
+#define NUMROWS	23
+#define NUMCOLS	13
+
+/* Wall id - Arbitrary, but shouldn't have the same value as one of the colors */
+#define WALL 16
+
+/*
+ * Type definitions
+ */
+
+typedef int board_t[NUMCOLS][NUMROWS];
+
+typedef struct
+{
+   int x,y;
+} block_t;
+
+typedef struct
+{
+   int color;
+   int type;
+   bool flipped;
+   block_t block[NUMBLOCKS];
+} shape_t,shapes_t[NUMSHAPES];
+
+typedef struct
+{
+   int moves;
+   int rotations;
+   int dropcount;
+   int efficiency;
+   int droppedlines;
+   int currentdroppedlines;
+} status_t;
+
+typedef struct engine_struct
+{
+   bool shadow;                                     /* show shadow */
+   int curx,cury,curx_shadow,cury_shadow;			/* coordinates of current piece */
+   int curshape,nextshape;							/* current & next shapes */
+   int score;										/* score */
+   int bag_iterator;								/* iterator for randomized bag */
+   int bag[NUMSHAPES];								/* pointer to bag of shapes */
+   shapes_t shapes;									/* shapes */
+   board_t board;									/* board */
+   status_t status;									/* current status of shapes */
+   void (*score_function)(struct engine_struct *);	/* score function */
+} engine_t;
+
+typedef enum { ACTION_LEFT, ACTION_ROTATE, ACTION_RIGHT, ACTION_DROP, ACTION_DOWN } action_t;
+
+/*
+ * Global variables
+ */
+
+extern const shapes_t SHAPES;
+
+/*
+ * Functions
+ */
+
+/*
+ * Initialize specified tetris engine
+ */
+void engine_init (engine_t *engine,void (*score_function)(engine_t *));
+
+/*
+ * Perform the given action on the specified tetris engine
+ */
+void engine_move (engine_t *engine,action_t action);
+
+/*
+ * Evaluate the status of the specified tetris engine
+ *
+ * OUTPUT:
+ *   1 = shape moved down one line
+ *   0 = shape at bottom, next one released
+ *  -1 = game over (board full)
+ */
+int engine_evaluate (engine_t *engine);
+
+/*
+ * Global variables
+ */
+
+const shapes_t SHAPES =
+{
+   { COLOR_CYAN,    0, FALSE, { {  1,  0 }, {  0,  0 }, {  0, -1 }, { -1, -1 } } },
+   { COLOR_GREEN,   1, FALSE, { {  1, -1 }, {  0, -1 }, {  0,  0 }, { -1,  0 } } },
+   { COLOR_YELLOW,  2, FALSE, { { -1,  0 }, {  0,  0 }, {  1,  0 }, {  0,  1 } } },
+   { COLOR_BLUE,    3, FALSE, { { -1, -1 }, {  0, -1 }, { -1,  0 }, {  0,  0 } } },
+   { COLOR_MAGENTA, 4, FALSE, { { -1,  1 }, { -1,  0 }, {  0,  0 }, {  1,  0 } } },
+   { COLOR_WHITE,   5, FALSE, { {  1,  1 }, {  1,  0 }, {  0,  0 }, { -1,  0 } } },
+   { COLOR_RED,     6, FALSE, { { -1,  0 }, {  0,  0 }, {  1,  0 }, {  2,  0 } } }
+};
+
+/*
+ * Functions
+ */
+
+/* This rotates a shape */
+static void real_rotate (shape_t *shape,bool clockwise)
+{
+   int i,tmp;
+   if (clockwise)
+	 {
+		for (i = 0; i < NUMBLOCKS; i++)
+		  {
+			 tmp = shape->block[i].x;
+			 shape->block[i].x = -shape->block[i].y;
+			 shape->block[i].y = tmp;
+		  }
+	 }
+   else
+	 {
+		for (i = 0; i < NUMBLOCKS; i++)
+		  {
+			 tmp = shape->block[i].x;
+			 shape->block[i].x = shape->block[i].y;
+			 shape->block[i].y = -tmp;
+		  }
+	 }
+}
+
+/* Rotate shapes the way tetris likes it (= not mathematically correct) */
+static void fake_rotate (shape_t *shape)
+{
+   switch (shape->type)
+	 {
+	  case 0:	/* Just rotate this one anti-clockwise and clockwise */
+		if (shape->flipped) real_rotate (shape,TRUE); else real_rotate (shape,FALSE);
+		shape->flipped = !shape->flipped;
+		break;
+	  case 1:	/* Just rotate these two clockwise and anti-clockwise */
+	  case 6:
+		if (shape->flipped) real_rotate (shape,FALSE); else real_rotate (shape,TRUE);
+		shape->flipped = !shape->flipped;
+		break;
+	  case 2:	/* Rotate these three anti-clockwise */
+	  case 4:
+	  case 5:
+		real_rotate (shape,FALSE);
+		break;
+	  case 3:	/* This one is not rotated at all */
+		break;
+	 }
+}
+
+/* Draw a shape on the board */
+static void drawshape (board_t board,shape_t *shape,int x,int y)
+{
+   int i;
+   for (i = 0; i < NUMBLOCKS; i++) board[x + shape->block[i].x][y + shape->block[i].y] = shape->color;
+}
+
+/* Erase a shape from the board */
+static void eraseshape (board_t board,shape_t *shape,int x,int y)
+{
+   int i;
+   for (i = 0; i < NUMBLOCKS; i++) board[x + shape->block[i].x][y + shape->block[i].y] = COLOR_BLACK;
+}
+
+/* Check if shape is allowed to be in this position */
+static bool allowed (board_t board,shape_t *shape,int x,int y)
+{
+   int i,occupied = FALSE;
+   for (i = 0; i < NUMBLOCKS; i++) if (board[x + shape->block[i].x][y + shape->block[i].y]) occupied = TRUE;
+   return (!occupied);
+}
+
+/* Set y coordinate of shadow */
+static void place_shadow_to_bottom (board_t board,shape_t *shape,int x_shadow,int *y_shadow,int y) {
+   while (allowed(board,shape,x_shadow,y+1)) y++;
+   *y_shadow = y;
+}
+
+/* Move the shape left if possible */
+static bool shape_left (engine_t *engine)
+{
+   board_t *board = &engine->board;
+   shape_t *shape = &engine->shapes[engine->curshape];
+   bool result = FALSE;
+   eraseshape (*board,shape,engine->curx,engine->cury);
+   if (engine->shadow) eraseshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   if (allowed (*board,shape,engine->curx - 1,engine->cury))
+	 {
+        engine->curx--;
+        result = TRUE;
+        if (engine->shadow)
+        {
+            engine->curx_shadow--;
+            place_shadow_to_bottom(*board,shape,engine->curx_shadow,&engine->cury_shadow,engine->cury);
+        }
+	 }
+   if (engine->shadow) drawshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   drawshape (*board,shape,engine->curx,engine->cury);
+   return result;
+}
+
+/* Move the shape right if possible */
+static bool shape_right (engine_t *engine)
+{
+   board_t *board = &engine->board;
+   shape_t *shape = &engine->shapes[engine->curshape];
+   bool result = FALSE;
+   eraseshape (*board,shape,engine->curx,engine->cury);
+   if (engine->shadow) eraseshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   if (allowed (*board,shape,engine->curx + 1,engine->cury))
+	 {
+		engine->curx++;
+		result = TRUE;
+		if (engine->shadow)
+		{
+            engine->curx_shadow++;
+            place_shadow_to_bottom(*board,shape,engine->curx_shadow,&engine->cury_shadow,engine->cury);
+		}
+	 }
+   if (engine->shadow) drawshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   drawshape (*board,shape,engine->curx,engine->cury);
+   return result;
+}
+
+/* Rotate the shape if possible */
+static bool shape_rotate (engine_t *engine)
+{
+   board_t *board = &engine->board;
+   shape_t *shape = &engine->shapes[engine->curshape];
+   bool result = FALSE;
+   shape_t test;
+   eraseshape (*board,shape,engine->curx,engine->cury);
+   if (engine->shadow) eraseshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   memcpy (&test,shape,sizeof (shape_t));
+   fake_rotate (&test);
+   if (allowed (*board,&test,engine->curx,engine->cury))
+	 {
+		memcpy (shape,&test,sizeof (shape_t));
+		result = TRUE;
+		if (engine->shadow) place_shadow_to_bottom(*board,shape,engine->curx_shadow,&engine->cury_shadow,engine->cury);
+	 }
+   if (engine->shadow) drawshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   drawshape (*board,shape,engine->curx,engine->cury);
+   return result;
+}
+
+/* Move the shape one row down if possible */
+static bool shape_down (engine_t *engine)
+{
+   board_t *board = &engine->board;
+   shape_t *shape = &engine->shapes[engine->curshape];
+   bool result = FALSE;
+   eraseshape (*board,shape,engine->curx,engine->cury);
+   if (engine->shadow) eraseshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   if (allowed (*board,shape,engine->curx,engine->cury + 1))
+	 {
+		engine->cury++;
+		result = TRUE;
+		if (engine->shadow) place_shadow_to_bottom(*board,shape,engine->curx_shadow,&engine->cury_shadow,engine->cury);
+	 }
+   if (engine->shadow) drawshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   drawshape (*board,shape,engine->curx,engine->cury);
+   return result;
+}
+
+/* Check if shape can move down (= in the air) or not (= at the bottom */
+/* of the board or on top of one of the resting shapes) */
+static bool shape_bottom (engine_t *engine)
+{
+   board_t *board = &engine->board;
+   shape_t *shape = &engine->shapes[engine->curshape];
+   bool result = FALSE;
+   eraseshape (*board,shape,engine->curx,engine->cury);
+   if (engine->shadow) eraseshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   result = !allowed (*board,shape,engine->curx,engine->cury + 1);
+   if (engine->shadow) drawshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+   drawshape (*board,shape,engine->curx,engine->cury);
+   return result;
+}
+
+/* Drop the shape until it comes to rest on the bottom of the board or */
+/* on top of a resting shape */
+static int shape_drop (engine_t *engine)
+{
+   board_t *board = &engine->board;
+   shape_t *shape = &engine->shapes[engine->curshape];
+   eraseshape (*board,shape,engine->curx,engine->cury);
+   int droppedlines = 0;
+
+   if (engine->shadow) {
+       drawshape (*board,shape,engine->curx_shadow,engine->cury_shadow);
+       droppedlines = engine->cury_shadow - engine->cury;
+       engine->cury = engine->cury_shadow;
+       return droppedlines;
+   }
+
+   while (allowed (*board,shape,engine->curx,engine->cury + 1))
+	 {
+		engine->cury++;
+		droppedlines++;
+	 }
+   drawshape (*board,shape,engine->curx,engine->cury);
+   return droppedlines;
+}
+
+/* This removes all the rows on the board that is completely filled with blocks */
+static int droplines (board_t board)
+{
+   int i,x,y,ny,status,droppedlines;
+   board_t newboard;
+   /* initialize new board */
+   memset (newboard,0,sizeof (board_t));
+   for (i = 0; i < NUMCOLS; i++) newboard[i][NUMROWS - 1] = newboard[i][NUMROWS - 2] = WALL;
+   for (i = 0; i < NUMROWS; i++) newboard[0][i] = newboard[NUMCOLS - 1][i] = newboard[NUMCOLS - 2][i] = WALL;
+   /* ... */
+   ny = NUMROWS - 3;
+   droppedlines = 0;
+   for (y = NUMROWS - 3; y > 0; y--)
+	 {
+		status = 0;
+		for (x = 1; x < NUMCOLS - 2; x++) if (board[x][y]) status++;
+		if (status < NUMCOLS - 3)
+		  {
+			 for (x = 1; x < NUMCOLS - 2; x++) newboard[x][ny] = board[x][y];
+			 ny--;
+		  }
+		else droppedlines++;
+	 }
+   memcpy (board,newboard,sizeof (board_t));
+   return droppedlines;
+}
+
+/* shuffle int array */
+void shuffle (int *array, size_t n)
+{
+   size_t i;
+   for (i = 0; i < n - 1; i++)
+   {
+      int range = (int)(n - i);
+      size_t j = i + rand_value(range);
+      int t = array[j];
+      array[j] = array[i];
+      array[i] = t;
+   }
+}
+
+/*
+ * Initialize specified tetris engine
+ */
+void engine_init (engine_t *engine,void (*score_function)(engine_t *))
+{
+   int i;
+   engine->shadow = FALSE;
+   engine->score_function = score_function;
+   /* intialize values */
+   engine->curx = 5;
+   engine->cury = 1;
+   engine->curx_shadow = 5;
+   engine->cury_shadow = 1;
+   engine->bag_iterator = 0;
+   /* create and randomize bag */
+   for (int j = 0; j < NUMSHAPES; j++) engine->bag[j] = j;
+   shuffle (engine->bag,NUMSHAPES);
+   engine->curshape = engine->bag[engine->bag_iterator%NUMSHAPES];
+   engine->nextshape = engine->bag[(engine->bag_iterator+1)%NUMSHAPES];
+   engine->bag_iterator++;
+   engine->score = 0;
+   engine->status.moves = engine->status.rotations = engine->status.dropcount = engine->status.efficiency = engine->status.droppedlines = 0;
+   /* initialize shapes */
+   memcpy (engine->shapes,SHAPES,sizeof (shapes_t));
+   /* initialize board */
+   memset (engine->board,0,sizeof (board_t));
+   for (i = 0; i < NUMCOLS; i++) engine->board[i][NUMROWS - 1] = engine->board[i][NUMROWS - 2] = WALL;
+   for (i = 0; i < NUMROWS; i++) engine->board[0][i] = engine->board[NUMCOLS - 1][i] = engine->board[NUMCOLS - 2][i] = WALL;
+}
+
+/*
+ * Perform the given action on the specified tetris engine
+ */
+void engine_move (engine_t *engine,action_t action)
+{
+   switch (action)
+	 {
+		/* move shape to the left if possible */
+	  case ACTION_LEFT:
+        if (shape_left (engine)) engine->status.moves++;
+		break;
+		/* rotate shape if possible */
+	  case ACTION_ROTATE:
+		if (shape_rotate (engine)) engine->status.rotations++;
+		break;
+		/* move shape to the right if possible */
+	  case ACTION_RIGHT:
+	    if (shape_right (engine)) engine->status.moves++;
+		break;
+		/* move shape to the down if possible */
+	  case ACTION_DOWN:
+		if (shape_down (engine)) engine->status.moves++;
+		break;
+		/* drop shape to the bottom */
+	  case ACTION_DROP:
+		engine->status.dropcount += shape_drop (engine);
+	 }
+}
+
+/*
+ * Evaluate the status of the specified tetris engine
+ *
+ * OUTPUT:
+ *   1 = shape moved down one line
+ *   0 = shape at bottom, next one released
+ *  -1 = game over (board full)
+ */
+int engine_evaluate (engine_t *engine)
+{
+   if (shape_bottom (engine))
+	 {
+		/* update status information */
+		int dropped_lines = droplines(engine->board);
+		engine->status.droppedlines += dropped_lines;
+		engine->status.currentdroppedlines = dropped_lines;
+		/* increase score */
+		engine->score_function (engine);
+		engine->curx -= 5;
+		engine->curx = abs (engine->curx);
+		engine->curx_shadow -= 5;
+		engine->curx_shadow = abs (engine->curx_shadow);
+		engine->status.rotations = 4 - engine->status.rotations;
+		engine->status.rotations = engine->status.rotations > 0 ? 0 : engine->status.rotations;
+		engine->status.efficiency += engine->status.dropcount + engine->status.rotations + (engine->curx - engine->status.moves);
+		engine->status.efficiency >>= 1;
+		engine->status.dropcount = engine->status.rotations = engine->status.moves = 0;
+		/* intialize values */
+		engine->curx = 5;
+		engine->cury = 1;
+		engine->curx_shadow = 5;
+		engine->cury_shadow = 1;
+		engine->curshape = engine->bag[engine->bag_iterator%NUMSHAPES];
+		/* shuffle bag before first item in bag would be reused */
+		if ((engine->bag_iterator+1) % NUMSHAPES == 0) shuffle(engine->bag, NUMSHAPES);
+		engine->nextshape = engine->bag[(engine->bag_iterator+1)%NUMSHAPES];
+		engine->bag_iterator++;
+		/* initialize shapes */
+		memcpy (engine->shapes,SHAPES,sizeof (shapes_t));
+		/* return games status */
+		return allowed (engine->board,&engine->shapes[engine->curshape],engine->curx,engine->cury) ? 0 : -1;
+	 }
+   shape_down (engine);
+   return 1;
+}
 
 /*
  * Macros

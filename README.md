@@ -9,3 +9,7 @@ written by Alexey Pajitnov, Dmitry Pavlovsky, and Vadim Gerasimov.
 The game is as close to the original as possible, but there are a few
 differences. Nevertheless, it's probably the closest to the original
 that you'll ever find in the UNIX world...
+
+
+i have made some minor modifications (concatenating into a single file, couple of little patches)
+    - werdl
