@@ -1,4 +1,3 @@
-
 # -*- sh -*-
 
 #  Copyright (c) Abraham vd Merwe <abz@blio.net>
@@ -28,54 +27,7 @@
 #  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-bindir = $(DESTDIR)/usr/games
-mandir = $(DESTDIR)/usr/share/man
-localstatedir = $(DESTDIR)/var/games
-
-ifeq ($(CC),)
-CC = gcc
-else
-ifeq ($(CC),colorgcc)
-	ifneq ($(CROSS),)
-	CC = gcc
-	endif
-endif
-endif
-
-CFLAGS += -Wall
-CPPFLAGS = -DSCOREFILE=\"$(localstatedir)/$(PRG).scores\" #-DUSE_RAND
-LDLIBS = -lncurses
-
-OBJ = tint.o
-SRC = tint.c
-PRG = tint
-
-       ########### NOTHING TO EDIT BELOW THIS ###########
-
-.PHONY: all clean do-it-all depend with-depends without-depends debian
-
-all: do-it-all
-
-ifeq (.depends,$(wildcard .depends))
-include .depends
-do-it-all: with-depends
-else
-do-it-all: without-depends
-endif
-
-without-depends: depend with-depends
-
-depend:
-	rm -f .depends
-	set -e; for F in $(SRC); do $(CC) -MM $(CFLAGS) $(CPPFLAGS) $$F >> .depends; done
-
-with-depends: $(PRG)
-
-$(PRG): $(OBJ)
-	$(CROSS)$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
-
-clean:
-	rm -f .depends *~ $(OBJ) $(PRG) {configure,build}-stamp gmon.out a.out
-
-distclean: clean
-
+all: 
+	cc tint.c -Wall -o tint -lncurses
+clean: 
+	rm tint
