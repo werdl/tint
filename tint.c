@@ -1374,6 +1374,41 @@ static bool evaluate(engine_t *engine) {
   return finished;
 }
 
+int update_timefile(int elapsed) {
+    // add elapsed time to time stored in timefile
+    char *timefile = "/var/games/tint.time";
+
+    FILE *handle;
+    int stored_time = 0;
+    if ((handle = fopen(timefile, "r")) == NULL) {
+        // timefile does not exist, create it with elapsed time
+        if ((handle = fopen(timefile, "w")) == NULL) {
+            fprintf(stderr, "Error creating %s\n", timefile);
+            return -1;
+        }
+        fprintf(handle, "%d", elapsed);
+        fclose(handle);
+        return elapsed;
+    } else {
+        // timefile exists, read stored time and add elapsed time
+        if (fscanf(handle, "%d", &stored_time) != 1) {
+            fprintf(stderr, "Error reading from %s\n", timefile);
+            fclose(handle);
+            return -1;
+        }
+        fclose(handle);
+        stored_time += elapsed;
+        // write updated time back to timefile
+        if ((handle = fopen(timefile, "w")) == NULL) {
+            fprintf(stderr, "Error writing to %s\n", timefile);
+            return -1;
+        }
+        fprintf(handle, "%d", stored_time);
+        fclose(handle);
+        return stored_time;
+    }
+}
+
 /***************************************************************************/
 /***************************************************************************/
 /***************************************************************************/
@@ -1382,6 +1417,12 @@ int main(int argc, char *argv[]) {
   bool finished;
   int ch;
   engine_t engine;
+  time_t start;
+  time_t end;
+  int elapsed;
+
+  start = time(NULL);
+
   /* Initialize */
   rand_init(); /* must be called before engine_init () */
   engine_init(&engine,
@@ -1492,6 +1533,10 @@ int main(int argc, char *argv[]) {
   } while (!finished);
   /* Restore console settings and exit */
   io_close();
+  end = time(NULL);
+  elapsed = (int)difftime(end, start);
+  update_timefile(elapsed);
+
   /* Don't bother the player if he want's to quit */
   if (ch != 'q') {
     showplayerstats(&engine);
